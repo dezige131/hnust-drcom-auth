@@ -6,8 +6,13 @@ CONFIG=campus-auth
 LOCK_DIR=/tmp/campus-auth.lock
 LOG_TAG=campus-auth
 
+print_msg() {
+	printf '%s\n' "$*"
+}
+
 log_msg() {
 	logger -t "$LOG_TAG" -- "$*"
+	print_msg "$*"
 }
 
 urlencode() {
@@ -51,20 +56,40 @@ run_auth() {
 	config_get student_id main student_id ''
 	config_get password main password ''
 	config_get method main login_method 1
+	config_get interface main interface wan
 	[ -n "$student_id" ] || { log_msg 'student ID is empty'; return 1; }
 	[ -n "$password" ] || { log_msg 'password is empty'; return 1; }
+	print_msg '校园网认证开始'
+	print_msg "认证接口: $interface"
 	ip=$(get_ip)
 	[ -n "$ip" ] || { log_msg 'could not determine the IPv4 address'; return 1; }
+	print_msg "当前 IPv4: $ip"
 	account=$(build_account "$method" "$student_id") || { log_msg 'invalid login method'; return 1; }
 	account_q=$(LC_ALL=C urlencode "$account")
 	password_q=$(LC_ALL=C urlencode "$password")
 
+	print_msg '正在请求认证服务器...'
 	response=$(wget -q -T 15 -O - "http://192.168.254.226:801/eportal/portal/login?callback=dr1003&login_method=$method&user_account=$account_q&user_password=$password_q&wlan_user_ip=$ip&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=&wlan_ac_name=&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&v=4149&lang=zh" 2>/dev/null)
+	[ -n "$response" ] && print_msg "服务器响应: $response"
 	result=$(printf '%s' "$response" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 	case "$result" in
-		0) log_msg "already online: $ip"; return 0 ;;
-		1) log_msg "authentication succeeded: $ip"; return 0 ;;
-		*) log_msg "authentication failed (response: ${response:-empty})"; return 1 ;;
+		0)
+			log_msg "认证结果: 已经在线 ($ip)"
+			return 0
+			;;
+		1)
+			log_msg "认证结果: 认证成功 ($ip)"
+			return 0
+			;;
+		*)
+			log_msg '认证结果: 认证失败'
+			if [ -z "$response" ]; then
+				print_msg '服务器没有返回有效响应'
+			else
+				print_msg "服务器响应无法识别: $response"
+			fi
+			return 1
+			;;
 	esac
 }
 
