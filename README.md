@@ -76,6 +76,31 @@ apk add --allow-untrusted /tmp/luci-app-campus-auth_*.apk
 
 修改配置后点击“保存并应用”，插件会自动更新 cron 任务。
 
+## 无 LuCI 时通过命令行配置
+
+通过 SSH 登录路由器，使用 UCI 设置学号、密码等参数。以下示例选择移动、手机终端、`wan` 接口，并在每天 `03:00` 检查；请将学号和密码替换为自己的信息：
+
+```sh
+uci set campus-auth.main.enabled='1'
+uci set campus-auth.main.boot_auth_enabled='1'
+uci set campus-auth.main.student_id='你的学号'
+uci set campus-auth.main.password='你的密码'
+uci set campus-auth.main.login_method='2'
+uci set campus-auth.main.terminal_type='2'
+uci set campus-auth.main.interface='wan'
+uci set campus-auth.main.schedule_enabled='1'
+uci set campus-auth.main.schedule_hour='3'
+uci set campus-auth.main.schedule_minute='0'
+uci commit campus-auth
+/etc/init.d/campus-auth enable
+/etc/init.d/campus-auth reload
+campus-auth check
+```
+
+`login_method` 的取值：`1` 电信、`2` 移动、`3` 联通、`4` 校园网。`terminal_type` 的取值：`1` 电脑、`2` 手机。设为 `boot_auth_enabled='0'` 可关闭开机自动认证；设为 `schedule_enabled='0'` 可关闭每日检查。修改配置后都需要执行 `uci commit campus-auth` 和 `/etc/init.d/campus-auth reload`。
+
+命令行输入的密码可能留在 Shell 历史记录中。不要向他人发送包含密码的命令或 `uci show campus-auth` 的完整输出。
+
 ## 账号格式
 
 插件根据运营商和终端类型生成 Portal 的 `user_account`：
