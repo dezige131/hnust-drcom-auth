@@ -8,10 +8,7 @@
             "uci": [ "campus-auth" ]
         },
         "write": {
-            "uci": [ "campus-auth" ],
-            "file": {
-                "/etc/init.d/campus-auth": [ "exec" ]
-            }
+            "uci": [ "campus-auth" ]
         }
     }
 }

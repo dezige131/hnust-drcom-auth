@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-campus-auth
 PKG_VERSION:=1.0.0
-PKG_RELEASE:=5
+PKG_RELEASE:=6
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -44,7 +44,7 @@ define Package/luci-app-campus-auth/postinst
 #!/bin/sh
 [ -n "$$IPKG_INSTROOT" ] || {
 	/etc/init.d/campus-auth enable
-	/etc/init.d/campus-auth reload
+	/etc/init.d/campus-auth start
 	/etc/init.d/rpcd restart
 }
 exit 0

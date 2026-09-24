@@ -2,7 +2,6 @@
 'require view';
 'require form';
 'require fs';
-'require ui';
 
 function refreshLog(output) {
 	output.textContent = '正在读取日志...';
@@ -80,17 +79,6 @@ return view.extend({
 
 			refreshLog(output);
 			return E('div', {}, [ map, logs ]);
-		});
-	},
-
-	handleSaveApply: function(ev) {
-		return this.handleSave(ev).then(function() {
-			return ui.changes.apply();
-		}).then(function() {
-			return fs.exec('/etc/init.d/campus-auth', [ 'reload' ]);
-		}).then(function(result) {
-			if (result.code !== 0)
-				throw new Error('Failed to reload campus-auth: ' + result.stderr);
 		});
 	}
 });
