@@ -4,6 +4,17 @@
 'require fs';
 'require ui';
 
+function refreshLog(output) {
+	output.textContent = '正在读取日志...';
+	return fs.exec('/sbin/logread', [ '-e', 'campus-auth' ]).then(function(result) {
+		if (result.code !== 0)
+			throw new Error(result.stderr || 'logread failed');
+		output.textContent = result.stdout.trim() || '暂无认证日志';
+	}).catch(function(error) {
+		output.textContent = '读取日志失败：' + error.message;
+	});
+}
+
 return view.extend({
 	render: function() {
 		var m = new form.Map('campus-auth', '校园网认证');
@@ -34,21 +45,42 @@ return view.extend({
 		o.default = 'wan';
 		o.rmempty = false;
 
+		s = m.section(form.NamedSection, 'main', 'campus_auth', '每日检查时间');
+		s.addremove = false;
+
 		o = s.option(form.Flag, 'schedule_enabled', '启用每日检查');
 		o.default = '1';
 		o.rmempty = false;
 
-		o = s.option(form.Value, 'schedule_hour', '检查小时');
+		o = s.option(form.Value, 'schedule_hour', '时（0–23）');
 		o.datatype = 'range(0,23)';
 		o.default = '3';
 		o.rmempty = false;
+		o.depends('schedule_enabled', '1');
 
-		o = s.option(form.Value, 'schedule_minute', '检查分钟');
+		o = s.option(form.Value, 'schedule_minute', '分（0–59）');
 		o.datatype = 'range(0,59)';
 		o.default = '0';
 		o.rmempty = false;
+		o.depends('schedule_enabled', '1');
 
-		return m.render();
+		return m.render().then(function(map) {
+			var output = E('pre', {
+				'style': 'max-height:24em;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere'
+			}, '正在读取日志...');
+			var logs = E('div', { 'class': 'cbi-section' }, [
+				E('h3', {}, '认证日志'),
+				E('button', {
+					'class': 'btn cbi-button cbi-button-action',
+					'type': 'button',
+					'click': function() { return refreshLog(output); }
+				}, '刷新日志'),
+				output
+			]);
+
+			refreshLog(output);
+			return E('div', {}, [ map, logs ]);
+		});
 	},
 
 	handleSaveApply: function(ev) {
