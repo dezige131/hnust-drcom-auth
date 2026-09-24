@@ -11,13 +11,14 @@ log_msg() {
 }
 
 urlencode() {
-	# The credentials normally contain only ASCII characters, but encode all
-	# bytes outside the URL-safe set so passwords cannot corrupt the query.
-	printf '%s' "$1" | od -An -v -tx1 | tr -s ' ' '\n' | while read -r byte; do
-		[ -n "$byte" ] || continue
-		case "$byte" in
-			2d|2e|30|31|32|33|34|35|36|37|38|39|41|42|43|44|45|46|47|48|49|4a|4b|4c|4d|4e|4f|50|51|52|53|54|55|56|57|58|59|5a|5f|61|62|63|64|65|66|67|68|69|6a|6b|6c|6d|6e|6f|70|71|72|73|74|75|76|77|78|79|7a) printf '%b' "\\$(printf '%03o' "0x$byte")";;
-			*) printf '%%%s' "$byte";;
+	local value char
+	value=$1
+	while [ -n "$value" ]; do
+		char=${value%"${value#?}"}
+		value=${value#?}
+		case "$char" in
+			[a-zA-Z0-9._~-]) printf '%s' "$char" ;;
+			*) printf '%%%02X' "'$char" ;;
 		esac
 	done
 }
@@ -55,8 +56,8 @@ run_auth() {
 	ip=$(get_ip)
 	[ -n "$ip" ] || { log_msg 'could not determine the IPv4 address'; return 1; }
 	account=$(build_account "$method" "$student_id") || { log_msg 'invalid login method'; return 1; }
-	account_q=$(urlencode "$account")
-	password_q=$(urlencode "$password")
+	account_q=$(LC_ALL=C urlencode "$account")
+	password_q=$(LC_ALL=C urlencode "$password")
 
 	response=$(wget -q -T 15 -O - "http://192.168.254.226:801/eportal/portal/login?callback=dr1003&login_method=$method&user_account=$account_q&user_password=$password_q&wlan_user_ip=$ip&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=&wlan_ac_name=&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&v=4149&lang=zh" 2>/dev/null)
 	result=$(printf '%s' "$response" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
