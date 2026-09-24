@@ -39,37 +39,49 @@ get_ip() {
 }
 
 build_account() {
+	local prefix
+	case "$2" in
+		1) prefix=0 ;;
+		2) prefix=1 ;;
+		*) return 1 ;;
+	esac
+
 	case "$1" in
-		1) printf ',0,%s@telecom' "$2" ;;
-		2) printf ',0,%s@cmcc' "$2" ;;
-		3) printf ',0,%s@unicom' "$2" ;;
-		4) printf ',0,%s@campus' "$2" ;;
+		1) printf ',%s,%s@telecom' "$prefix" "$3" ;;
+		2) printf ',%s,%s@cmcc' "$prefix" "$3" ;;
+		3) printf ',%s,%s@unicom' "$prefix" "$3" ;;
+		4) printf ',%s,%s' "$prefix" "$3" ;;
 		*) return 1 ;;
 	esac
 }
 
 run_auth() {
-	local student_id password method ip account account_q password_q response result
+	local student_id password method terminal_type ip account account_q password_q response result
 	config_load "$CONFIG"
 	config_get enabled main enabled 0
 	[ "$enabled" = '1' ] || { log_msg 'authentication is disabled'; return 1; }
 	config_get student_id main student_id ''
 	config_get password main password ''
 	config_get method main login_method 1
+	config_get terminal_type main terminal_type 2
 	config_get interface main interface wan
 	[ -n "$student_id" ] || { log_msg 'student ID is empty'; return 1; }
 	[ -n "$password" ] || { log_msg 'password is empty'; return 1; }
+	case "$terminal_type" in
+		1|2) ;;
+		*) log_msg 'invalid terminal type'; return 1 ;;
+	esac
 	print_msg '校园网认证开始'
 	print_msg "认证接口: $interface"
 	ip=$(get_ip)
 	[ -n "$ip" ] || { log_msg 'could not determine the IPv4 address'; return 1; }
 	print_msg "当前 IPv4: $ip"
-	account=$(build_account "$method" "$student_id") || { log_msg 'invalid login method'; return 1; }
+	account=$(build_account "$method" "$terminal_type" "$student_id") || { log_msg 'invalid login method'; return 1; }
 	account_q=$(LC_ALL=C urlencode "$account")
 	password_q=$(LC_ALL=C urlencode "$password")
 
 	print_msg '正在请求认证服务器...'
-	response=$(wget -q -T 15 -O - "http://192.168.254.226:801/eportal/portal/login?callback=dr1003&login_method=$method&user_account=$account_q&user_password=$password_q&wlan_user_ip=$ip&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=&wlan_ac_name=&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&v=4149&lang=zh" 2>/dev/null)
+	response=$(wget -q -T 15 -O - "http://192.168.254.226:801/eportal/portal/login?callback=dr1003&login_method=1&user_account=$account_q&user_password=$password_q&wlan_user_ip=$ip&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=&wlan_ac_name=&jsVersion=4.2.1&terminal_type=$terminal_type&lang=zh-cn&v=4149&lang=zh" 2>/dev/null)
 	[ -n "$response" ] && print_msg "服务器响应: $response"
 	result=$(printf '%s' "$response" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
 	case "$result" in

@@ -44,6 +44,11 @@ return view.extend({
 		o.value('4', '校园网');
 		o.default = '1';
 
+		o = s.option(form.ListValue, 'terminal_type', '终端类型', '手机请求使用 2，电脑请求使用 1。');
+		o.value('2', '手机');
+		o.value('1', '电脑');
+		o.default = '2';
+
 		o = s.option(form.Value, 'interface', '认证网络接口', '用于读取当前 IPv4 地址，通常为 wan。');
 		o.default = 'wan';
 		o.rmempty = false;
