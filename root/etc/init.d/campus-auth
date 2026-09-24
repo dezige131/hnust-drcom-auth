@@ -1,0 +1,35 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+USE_PROCD=1
+
+CRON_FILE=/etc/crontabs/root
+CRON_TAG='# campus-auth'
+
+write_cron() {
+	[ -f "$CRON_FILE" ] || touch "$CRON_FILE"
+	 sed -i "\\|$CRON_TAG|d" "$CRON_FILE"
+
+	config_load campus-auth
+	config_get enabled main enabled 0
+	config_get schedule_enabled main schedule_enabled 0
+	config_get hour main schedule_hour 3
+	config_get minute main schedule_minute 0
+	if [ "$enabled" = '1' ] && [ "$schedule_enabled" = '1' ]; then
+		printf '%s %s * * * /usr/bin/campus-auth check %s\n' "$minute" "$hour" "$CRON_TAG" >> "$CRON_FILE"
+	fi
+	/etc/init.d/cron restart >/dev/null 2>&1 || true
+}
+
+start_service() {
+	write_cron
+}
+
+reload_service() {
+	write_cron
+}
+
+stop_service() {
+	[ -f "$CRON_FILE" ] && sed -i "\\|$CRON_TAG|d" "$CRON_FILE"
+	/etc/init.d/cron restart >/dev/null 2>&1 || true
+}

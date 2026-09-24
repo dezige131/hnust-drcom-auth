@@ -1,0 +1,45 @@
+name: Build campus-auth IPK
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: OpenWrt SDK target architecture
+        required: true
+        type: choice
+        options:
+          - x86_64
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_generic
+          - mipsel_24kc
+          - mips_24kc
+        default: x86_64
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build for ${{ inputs.arch }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build package with OpenWrt SDK
+        uses: openwrt/gh-action-sdk@v11
+        env:
+          ARCH: ${{ inputs.arch }}
+          PACKAGES: luci-app-campus-auth
+          NO_SHFMT_CHECK: 1
+
+      - name: Upload IPK and build logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-campus-auth-${{ inputs.arch }}
+          path: |
+            bin/**/*.ipk
+            logs/**
+          if-no-files-found: error
+          retention-days: 14

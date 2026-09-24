@@ -1,0 +1,79 @@
+#!/bin/sh
+
+CONFIG=campus-auth
+LOCK_DIR=/tmp/campus-auth.lock
+LOG_TAG=campus-auth
+
+log_msg() {
+	logger -t "$LOG_TAG" -- "$*"
+}
+
+urlencode() {
+	# The credentials normally contain only ASCII characters, but encode all
+	# bytes outside the URL-safe set so passwords cannot corrupt the query.
+	printf '%s' "$1" | od -An -v -tx1 | tr -s ' ' '\n' | while read -r byte; do
+		[ -n "$byte" ] || continue
+		case "$byte" in
+			2d|2e|30|31|32|33|34|35|36|37|38|39|41|42|43|44|45|46|47|48|49|4a|4b|4c|4d|4e|4f|50|51|52|53|54|55|56|57|58|59|5a|5f|61|62|63|64|65|66|67|68|69|6a|6b|6c|6d|6e|6f|70|71|72|73|74|75|76|77|78|79|7a) printf "\\$(printf '%03o' "0x$byte")" 2>/dev/null || printf '%b' "\\$(printf '%03o' "0x$byte")";;
+			*) printf '%%%s' "$byte";;
+		esac
+	done
+}
+
+get_ip() {
+	config_get interface main interface wan
+	local ip
+	ip=$(ubus call "network.interface.$interface" status 2>/dev/null | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+	if [ -z "$ip" ]; then
+		ip=$(ip -4 addr show dev "$interface" 2>/dev/null | sed -n 's/[[:space:]]*inet \([^/]*\).*/\1/p' | sed -n '1p')
+	fi
+	printf '%s' "$ip"
+}
+
+build_account() {
+	case "$1" in
+		1) printf ',0,%s@telecom' "$2" ;;
+		2) printf ',0,%s@cmcc' "$2" ;;
+		3) printf ',0,%s@unicom' "$2" ;;
+		4) printf ',0,%s@campus' "$2" ;;
+		*) return 1 ;;
+	esac
+}
+
+run_auth() {
+	local student_id password method ip account account_q password_q response result
+	config_load "$CONFIG"
+	config_get enabled main enabled 0
+	[ "$enabled" = '1' ] || { log_msg 'authentication is disabled'; return 1; }
+	config_get student_id main student_id ''
+	config_get password main password ''
+	config_get method main login_method 1
+	[ -n "$student_id" ] || { log_msg 'student ID is empty'; return 1; }
+	[ -n "$password" ] || { log_msg 'password is empty'; return 1; }
+	ip=$(get_ip)
+	[ -n "$ip" ] || { log_msg 'could not determine the IPv4 address'; return 1; }
+	account=$(build_account "$method" "$student_id") || { log_msg 'invalid login method'; return 1; }
+	account_q=$(urlencode "$account")
+	password_q=$(urlencode "$password")
+
+	response=$(wget -q -T 15 -O - "http://192.168.254.226:801/eportal/portal/login?callback=dr1003&login_method=$method&user_account=$account_q&user_password=$password_q&wlan_user_ip=$ip&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=&wlan_ac_name=&jsVersion=4.2.1&terminal_type=1&lang=zh-cn&v=4149&lang=zh" 2>/dev/null)
+	result=$(printf '%s' "$response" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+	case "$result" in
+		0) log_msg "already online: $ip"; return 0 ;;
+		1) log_msg "authentication succeeded: $ip"; return 0 ;;
+		*) log_msg "authentication failed (response: ${response:-empty})"; return 1 ;;
+	esac
+}
+
+case "${1:-login}" in
+	login|check)
+		if mkdir "$LOCK_DIR" 2>/dev/null; then
+			trap 'rmdir "$LOCK_DIR"' EXIT INT TERM
+			run_auth
+			exit $?
+		fi
+		log_msg 'another authentication request is running'
+		exit 1
+		;;
+	*) echo "Usage: $0 [login|check]" >&2; exit 2 ;;
+esac
