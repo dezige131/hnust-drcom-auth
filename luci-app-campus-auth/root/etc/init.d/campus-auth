@@ -27,6 +27,16 @@ write_cron() {
 
 start_service() {
 	write_cron
+
+	config_load campus-auth
+	config_get enabled main enabled 0
+	config_get boot_auth_enabled main boot_auth_enabled 1
+	if [ "$enabled" = '1' ] && [ "$boot_auth_enabled" = '1' ]; then
+		(
+			sleep 15
+			/usr/bin/campus-auth check >/dev/null 2>&1
+		) &
+	fi
 }
 
 reload_service() {

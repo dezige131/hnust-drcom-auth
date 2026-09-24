@@ -26,6 +26,10 @@ return view.extend({
 		o.default = '1';
 		o.rmempty = false;
 
+		o = s.option(form.Flag, 'boot_auth_enabled', '开机自动认证', '路由器启动并等待网络就绪后，自动执行一次认证。');
+		o.default = '1';
+		o.rmempty = false;
+
 		o = s.option(form.Value, 'student_id', '学号');
 		o.rmempty = false;
 

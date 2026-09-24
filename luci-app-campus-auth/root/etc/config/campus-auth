@@ -1,5 +1,6 @@
 config campus_auth 'main'
 	option enabled '1'
+	option boot_auth_enabled '1'
 	option student_id ''
 	option password ''
 	option login_method '1'
