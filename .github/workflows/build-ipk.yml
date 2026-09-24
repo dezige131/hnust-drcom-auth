@@ -1,8 +1,16 @@
-name: Build campus-auth IPK
+name: Build campus-auth package
 
 on:
   workflow_dispatch:
     inputs:
+      release:
+        description: OpenWrt release (24.10.5 builds IPK; SNAPSHOT builds APK)
+        required: true
+        type: choice
+        options:
+          - '24.10.5'
+          - SNAPSHOT
+        default: '24.10.5'
       arch:
         description: OpenWrt SDK target architecture
         required: true
@@ -21,7 +29,7 @@ permissions:
 
 jobs:
   build:
-    name: Build for ${{ inputs.arch }}
+    name: Build ${{ inputs.release }} for ${{ inputs.arch }}
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -30,16 +38,41 @@ jobs:
       - name: Build package with OpenWrt SDK
         uses: openwrt/gh-action-sdk@v11
         env:
-          ARCH: ${{ inputs.arch }}
+          ARCH: ${{ inputs.release == 'SNAPSHOT' && inputs.arch || format('{0}-{1}', inputs.arch, inputs.release) }}
           PACKAGES: luci-app-campus-auth
           NO_SHFMT_CHECK: 1
 
-      - name: Upload IPK and build logs
+      - name: Verify and stage package
+        shell: bash
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -euo pipefail
+          extension=ipk
+          if [[ "$RELEASE" == SNAPSHOT ]]; then
+            extension=apk
+          fi
+          test -d bin/packages
+          mkdir -p dist
+          find bin/packages -type f -name "luci-app-campus-auth-*.${extension}" -print -exec cp -v '{}' dist/ \;
+          if ! find dist -maxdepth 1 -type f -name "luci-app-campus-auth-*.${extension}" -print -quit | grep -q .; then
+            echo "::error::No luci-app-campus-auth .${extension} package was produced"
+            exit 1
+          fi
+
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: luci-app-campus-auth-${{ inputs.arch }}
-          path: |
-            bin/**/*.ipk
-            logs/**
+          name: luci-app-campus-auth-${{ inputs.arch }}-${{ inputs.release }}
+          path: dist/*
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ inputs.arch }}-${{ inputs.release }}
+          path: logs/**
+          if-no-files-found: ignore
           retention-days: 14
