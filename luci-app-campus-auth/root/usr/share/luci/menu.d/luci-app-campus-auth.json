@@ -3,7 +3,7 @@
         "title": "校园网认证",
         "order": 80,
         "action": {
-            "type": "cbi",
+            "type": "view",
             "path": "campus-auth"
         },
         "depends": {

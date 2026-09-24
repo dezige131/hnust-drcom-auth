@@ -1,0 +1,14 @@
+{
+    "luci-app-campus-auth": {
+        "description": "Allow access to campus network authentication settings",
+        "read": {
+            "uci": [ "campus-auth" ]
+        },
+        "write": {
+            "uci": [ "campus-auth" ],
+            "file": {
+                "/etc/init.d/campus-auth": [ "exec" ]
+            }
+        }
+    }
+}

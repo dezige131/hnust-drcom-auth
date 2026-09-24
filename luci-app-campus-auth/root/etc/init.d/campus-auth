@@ -8,7 +8,7 @@ CRON_TAG='# campus-auth'
 
 write_cron() {
 	[ -f "$CRON_FILE" ] || touch "$CRON_FILE"
-	 sed -i "\\|$CRON_TAG|d" "$CRON_FILE"
+	sed -i "\\|$CRON_TAG|d" "$CRON_FILE"
 
 	config_load campus-auth
 	config_get enabled main enabled 0
