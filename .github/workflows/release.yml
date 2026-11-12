@@ -2,14 +2,17 @@ name: Release campus-auth packages
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'luci-app-campus-auth/**'
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing git tag to publish (for example v1.1.0-r1)
-        required: true
+        description: Tag to publish (auto = derive from Makefile, create it if missing)
+        required: false
         type: string
+        default: auto
 
 permissions:
   contents: write
@@ -24,34 +27,78 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      skip: ${{ steps.tag.outputs.skip }}
+      created: ${{ steps.tag.outputs.created }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Resolve and verify tag
+      - name: Resolve tag name
         id: tag
         shell: bash
         env:
-          INPUT_TAG: ${{ inputs.tag || '' }}
+          INPUT_TAG: ${{ inputs.tag || 'auto' }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          tag=${INPUT_TAG:-${GITHUB_REF_NAME}}
-          if ! git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
-            if git ls-remote --exit-code --tags origin "refs/tags/v${tag}" >/dev/null 2>&1; then
-              tag="v${tag}"
+          skip=0
+          created=0
+          version=$(sed -n 's/^PKG_VERSION:=//p' luci-app-campus-auth/Makefile)
+          release=$(sed -n 's/^PKG_RELEASE:=//p' luci-app-campus-auth/Makefile)
+          if [ -z "${version}" ] || [ -z "${release}" ]; then
+            echo "::error::Could not read PKG_VERSION / PKG_RELEASE from luci-app-campus-auth/Makefile"
+            exit 1
+          fi
+          derived="v${version}-r${release}"
+
+          if [ "${INPUT_TAG}" != 'auto' ] && [ -n "${INPUT_TAG}" ]; then
+            # An explicit tag was typed in the manual run: it has to exist already.
+            tag="${INPUT_TAG}"
+            if ! git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+              if git ls-remote --exit-code --tags origin "refs/tags/v${tag}" >/dev/null 2>&1; then
+                tag="v${tag}"
+              else
+                echo "::error::Tag ${tag} does not exist in this repository"
+                exit 1
+              fi
+            fi
+            echo "using the tag given in the workflow input: ${tag}"
+          else
+            # No tag given: derive it from PKG_VERSION / PKG_RELEASE.
+            tag="${derived}"
+            echo "tag derived from the package version: ${tag}"
+            if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "${tag} already exists"
+              if [ "${EVENT_NAME}" = 'push' ]; then
+                echo "::notice::${tag} is already released, nothing to do. Bump PKG_RELEASE to release again."
+                skip=1
+              fi
             else
-              echo "::error::Tag ${tag} does not exist in this repository; create and push it first"
-              exit 1
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git tag -a "${tag}" -m "luci-app-campus-auth ${version}-r${release}"
+              if git push origin "refs/tags/${tag}"; then
+                created=1
+                echo "created tag ${tag} at $(git rev-parse HEAD)"
+              elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+                echo "${tag} was created by a parallel run in the meantime"
+              else
+                echo "::error::Could not create tag ${tag}"
+                exit 1
+              fi
             fi
           fi
-          echo "building tag ${tag} ($(git rev-parse "${tag}^{commit}"))"
+
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "skip=${skip}" >> "$GITHUB_OUTPUT"
+          echo "created=${created}" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build matrix
     needs: prepare
+    if: needs.prepare.outputs.skip != '1'
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +122,7 @@ jobs:
   release:
     name: Publish release
     needs: [ prepare, build ]
+    if: needs.build.result == 'success'
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -151,13 +199,6 @@ jobs:
               apk add --allow-untrusted /tmp/luci-app-campus-auth_x86_64-SNAPSHOT.apk
 
           如果 opkg 仍然提示签名问题，请先阅读 README 的“签名说明”一节。
-
-          ## 本次更新
-
-          - LuCI 页面新增“立即检查认证”按钮，可以直接在网页里触发一次登录检查
-          - 修复超出运营商在线设备数上限时被误判为认证成功的问题
-          - 修复安装时提示签名无效的问题（安装包不再随 SDK 临时密钥签名）
-          - 新增发布工作流，一次编译全部架构的 IPK 与 APK
 
           ## 校验
 

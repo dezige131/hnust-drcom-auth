@@ -133,20 +133,26 @@ APK 固件（apk 必须显式放行第三方签名）：
 
 ### 一次发布全部架构
 
-发布工作流有两种触发方式，二者都会编译同一个 tag 的源码：
+不用手动管 tag：只要修改了 luci-app-campus-auth 目录并推送到 main，发布工作流就会自动跑起来。
 
-**方式一：打 tag（推荐）**
+tag 名由包的版本号推导，格式是 vPKG_VERSION-rPKG_RELEASE，例如当前 Makefile 里是
 
-    git tag v1.1.0-r1
-    git push origin v1.1.0-r1
+    PKG_VERSION:=1.1.0
+    PKG_RELEASE:=1
 
-推送后自动触发 Release campus-auth packages，tag 名就是版本名和 Release 名。
+推导出的 tag 就是 v1.1.0-r1。工作流会先检查这个 tag 在远端是否存在：
 
-**方式二：在 Actions 手动运行**
+- 不存在：自动创建并推送该 tag，然后编译发布
+- 已存在：说明这个版本已经发布过，本次推送直接跳过，不会重复编译，也不会覆盖已有的 Release
 
-运行 Release campus-auth packages，在 tag 输入框里填已存在的 tag，例如 v1.1.0-r1。tag 必须先推送存在，否则工作流会在 Resolve tag 步骤直接失败；填错时会自动补一个 v 前缀再找一次（填 1.1.0-r1 也可以）。
+所以发新版本只需要改 Makefile：想发 1.2.0 就改 PKG_VERSION，同一个版本修 bug 就把 PKG_RELEASE 加一，然后提交推送到 main，其余交给工作流。
 
-手动运行时，工作流会先解析出这个 tag 的提交，再按该 tag 检出源码编译，产物与用 tag 触发完全一致，不会把分支上的新提交混进去。
+也可以在 Actions 页面手动运行 Release campus-auth packages：
+
+- tag 填 auto（默认）：同上，按 Makefile 推导，缺失就自动创建
+- tag 填具体值：必须是已存在的 tag，否则立即报错；填 1.1.0-r1 而仓库里是 v1.1.0-r1 时会自动补 v 前缀
+
+手动运行时，工作流会按解析出的 tag 检出源码再编译，产物与自动触发完全一致。
 
 编译内容：6 种架构 × 2 种包格式，共 12 个安装包，全部产物和 SHA256SUMS 上传到同名 GitHub Release：
 
@@ -155,7 +161,7 @@ APK 固件（apk 必须显式放行第三方签名）：
 
 产物统一命名为 luci-app-campus-auth_架构-分支.后缀，例如 luci-app-campus-auth_aarch64_cortex-a53-24.10.5.ipk。
 
-重复运行同一个 tag 时，已存在的同名资产会先删除再上传，不会报 “already_exists”。
+如果只想改文档（例如只动 README），不会触发发布，因为工作流的推送过滤只盯着 luci-app-campus-auth 目录。
 
 ### 单独编译一个包
 
