@@ -133,17 +133,29 @@ APK 固件（apk 必须显式放行第三方签名）：
 
 ### 一次发布全部架构
 
-推送一个 v 开头的 tag 即可触发发布工作流，也可以在 Actions 页面手动运行 Release campus-auth packages 并填入已有 tag（例如 v1.1.0）：
+发布工作流有两种触发方式，二者都会编译同一个 tag 的源码：
 
-    git tag v1.1.0
-    git push origin v1.1.0
+**方式一：打 tag（推荐）**
 
-发布工作流会编译 6 种架构 × 2 种包格式，共 12 个安装包，并把全部产物和 SHA256SUMS 上传到对应的 GitHub Release：
+    git tag v1.1.0-r1
+    git push origin v1.1.0-r1
+
+推送后自动触发 Release campus-auth packages，tag 名就是版本名和 Release 名。
+
+**方式二：在 Actions 手动运行**
+
+运行 Release campus-auth packages，在 tag 输入框里填已存在的 tag，例如 v1.1.0-r1。tag 必须先推送存在，否则工作流会在 Resolve tag 步骤直接失败；填错时会自动补一个 v 前缀再找一次（填 1.1.0-r1 也可以）。
+
+手动运行时，工作流会先解析出这个 tag 的提交，再按该 tag 检出源码编译，产物与用 tag 触发完全一致，不会把分支上的新提交混进去。
+
+编译内容：6 种架构 × 2 种包格式，共 12 个安装包，全部产物和 SHA256SUMS 上传到同名 GitHub Release：
 
 - 架构：x86_64、aarch64_cortex-a53、aarch64_cortex-a72、aarch64_generic、mipsel_24kc、mips_24kc
 - 格式：24.10.5（.ipk）与 SNAPSHOT（.apk）
 
 产物统一命名为 luci-app-campus-auth_架构-分支.后缀，例如 luci-app-campus-auth_aarch64_cortex-a53-24.10.5.ipk。
+
+重复运行同一个 tag 时，已存在的同名资产会先删除再上传，不会报 “already_exists”。
 
 ### 单独编译一个包
 

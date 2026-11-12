@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ''
+      ref:
+        description: Git tag or branch to build (empty uses the triggering ref)
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       release:
@@ -49,6 +54,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || github.ref }}
 
       - name: Build package with OpenWrt SDK
         uses: openwrt/gh-action-sdk@v11
