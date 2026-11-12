@@ -1,14 +1,15 @@
 {
-    "luci-app-campus-auth": {
-        "description": "Allow access to campus network authentication settings",
-        "read": {
-            "file": {
-                "/sbin/logread -e campus-auth": [ "exec" ]
-            },
-            "uci": [ "campus-auth" ]
-        },
-        "write": {
-            "uci": [ "campus-auth" ]
-        }
-    }
+	"luci-app-campus-auth": {
+		"description": "Allow access to campus network authentication settings",
+		"read": {
+			"file": {
+				"/usr/bin/campus-auth": [ "exec" ],
+				"/sbin/logread -e campus-auth": [ "exec" ]
+			},
+			"uci": [ "campus-auth" ]
+		},
+		"write": {
+			"uci": [ "campus-auth" ]
+		}
+	}
 }

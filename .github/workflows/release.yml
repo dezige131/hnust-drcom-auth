@@ -1,0 +1,171 @@
+name: Release campus-auth packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to publish (for example v1.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        release:
+          - '24.10.5'
+          - SNAPSHOT
+        arch:
+          - x86_64
+          - aarch64_cortex-a53
+          - aarch64_cortex-a72
+          - aarch64_generic
+          - mipsel_24kc
+          - mips_24kc
+    uses: ./.github/workflows/build-ipk.yml
+    with:
+      release: ${{ matrix.release }}
+      arch: ${{ matrix.arch }}
+      artifact-name: luci-app-campus-auth-${{ matrix.arch }}-${{ matrix.release }}
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download every built package
+        uses: actions/download-artifact@v4
+        with:
+          pattern: luci-app-campus-auth-*
+          path: artifacts
+
+      - name: Collect packages and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          shopt -s nullglob
+          for artifact in artifacts/*/; do
+            # artifact directory is named luci-app-campus-auth-<arch>-<release>
+            suffix=${artifact#artifacts/}
+            suffix=${suffix%/}
+            short=${suffix#luci-app-campus-auth-}
+            for file in "$artifact"*; do
+              [ -f "$file" ] || continue
+              name=$(basename "$file")
+              case "$name" in
+                *.ipk|*.apk) ;;
+                *) continue ;;
+              esac
+              cp -v "$file" "dist/luci-app-campus-auth_${short}.${name##*.}"
+            done
+          done
+          count=$(find dist -maxdepth 1 -type f \( -name '*.ipk' -o -name '*.apk' \) | wc -l)
+          echo "collected $count packages"
+          if [ "$count" -lt 1 ]; then
+            echo "::error::No packages were collected from the build matrix"
+            exit 1
+          fi
+          (cd dist && sha256sum ./*.ipk ./*.apk > SHA256SUMS 2>/dev/null || true)
+          ls -l dist
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_TAG" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "::error::Tag ${tag} does not exist in this repository; create and push it first"
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^PKG_VERSION:=//p' luci-app-campus-auth/Makefile)
+          release=$(sed -n 's/^PKG_RELEASE:=//p' luci-app-campus-auth/Makefile)
+          cat > NOTES.md <<EOF
+          LuCI 校园网认证插件 ${version}-r${release}（${TAG}）
+
+          ## 安装包命名
+
+          文件名格式为 luci-app-campus-auth_架构-分支.后缀，例如：
+
+          - luci-app-campus-auth_x86_64-24.10.5.ipk：适用于 OpenWrt 24.10.x、ImmortalWrt 24.10 等使用 opkg 的固件
+          - luci-app-campus-auth_x86_64-SNAPSHOT.apk：适用于用 apk 管理软件包的新版 OpenWrt / ImmortalWrt
+
+          先确认设备架构，再下载对应文件：
+
+              opkg print-architecture 2>/dev/null || cat /etc/apk/arch 2>/dev/null
+
+          ## 安装
+
+          IPK 固件：
+
+              opkg install /tmp/luci-app-campus-auth_x86_64-24.10.5.ipk
+
+          APK 固件：
+
+              apk add --allow-untrusted /tmp/luci-app-campus-auth_x86_64-SNAPSHOT.apk
+
+          如果 opkg 仍然提示签名问题，请先阅读 README 的“签名说明”一节。
+
+          ## 本次更新
+
+          - LuCI 页面新增“立即检查认证”按钮，可以直接在网页里触发一次登录检查
+          - 修复超出运营商在线设备数上限时被误判为认证成功的问题
+          - 修复安装时提示签名无效的问题（安装包不再随 SDK 临时密钥签名）
+          - 新增发布工作流，一次编译全部架构的 IPK 与 APK
+
+          ## 校验
+
+              sha256sum -c SHA256SUMS
+          EOF
+          cat NOTES.md
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists, replacing matching assets"
+          else
+            gh release create "${TAG}" --title "${TAG}" --notes-file NOTES.md
+          fi
+          existing=$(gh release view "${TAG}" --json assets --jq '.assets[].name' || true)
+          for file in dist/*; do
+            name=$(basename "$file")
+            if printf '%s\n' "$existing" | grep -Fxq "${name}"; then
+              gh release delete-asset "${TAG}" "${name}" --yes
+            fi
+          done
+          gh release upload "${TAG}" dist/* --clobber

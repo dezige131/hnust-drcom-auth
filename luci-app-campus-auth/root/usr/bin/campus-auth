@@ -28,6 +28,48 @@ urlencode() {
 	done
 }
 
+# The portal answers with a JSONP body such as
+#   dr1003({"result":0,"msg":"...","ret_code":1});
+# so the interesting fields are read out with two tiny sed helpers.
+json_number() {
+	printf '%s' "$1" | sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*\(-\{0,1\}[0-9][0-9]*\).*/\1/p'
+}
+
+json_string() {
+	printf '%s' "$1" | sed -n 's/.*"'"$2"'"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+# Turn the HTML laden message of the portal into a single readable line.
+plain_message() {
+	printf '%s' "$1" | sed -e 's#\\/#/#g' -e 's/<[^>]*>/ /g' \
+		-e 's/[[:space:]]\{1,\}/ /g' \
+		-e 's/ *\([，。；：、！？]\)/\1/g' \
+		-e 's/^[，、 ]*//' -e 's/^ *//' -e 's/ *$//'
+}
+
+# Collect the first few links from the message (usually the self service page).
+reply_urls() {
+	printf '%s' "$1" | sed -e 's#\\/#/#g' -e 's#[<>]#\n#g' | \
+		grep -oE 'https?://[^[:space:]]+' | sed -n '1,3p'
+}
+
+is_device_limit() {
+	# The portal keeps result=0 when the online device limit is reached and only
+	# signals the failure through ret_code=1 plus the message text, so the reply
+	# text has to be inspected instead of trusting "result" alone.
+	case "$1" in
+		*同时在线设备数*|*在线设备数上限*|*注销至少一个*|*设备数上限*) return 0 ;;
+	esac
+	return 1
+}
+
+is_failure_message() {
+	case "$1" in
+		*登录失败*|*认证失败*|*失败原因*) return 0 ;;
+	esac
+	return 1
+}
+
 get_ip() {
 	config_get interface main interface wan
 	local ip
@@ -55,8 +97,47 @@ build_account() {
 	esac
 }
 
+print_reply_message() {
+	local raw clean urls
+	raw=$1
+	[ -n "$raw" ] || return 0
+	clean=$(plain_message "$raw")
+	[ -n "$clean" ] && print_msg "服务器说明: $clean"
+	case "$raw" in
+		*http*)
+			urls=$(reply_urls "$raw")
+			if [ -n "$urls" ]; then
+				print_msg '相关链接:'
+				printf '%s\n' "$urls" | sed -e 's/^/  /'
+			fi
+			;;
+	esac
+}
+
+print_device_limit_hint() {
+	print_msg '处理建议：'
+	print_msg '  1. 打开校园网自助服务页面，注销至少一个已在线设备。'
+	print_msg '  2. 回到本页面再次点击“立即检查认证”。'
+	print_msg '  3. 如果经常出现该提示，请确认“终端类型”与实际设备一致。'
+}
+
+print_failure_hint() {
+	case "$1" in
+		*密码*|*password*)
+			print_msg '处理建议：请检查“密码”是否正确。'
+			;;
+		*账号*|*用户名*|*user*)
+			print_msg '处理建议：请检查“学号”和“运营商”是否与账号匹配。'
+			;;
+		*)
+			print_msg '处理建议：确认路由器已连接校园网、当前 IPv4 地址有效，并核对账号信息后重试。'
+			;;
+	esac
+}
+
 run_auth() {
-	local student_id password method terminal_type ip account account_q password_q response result
+	local student_id password method terminal_type ip account account_q password_q response
+	local result ret_code reply_message fail_reason online
 	config_load "$CONFIG"
 	config_get enabled main enabled 0
 	[ "$enabled" = '1' ] || { log_msg 'authentication is disabled'; return 1; }
@@ -82,27 +163,60 @@ run_auth() {
 
 	print_msg '正在请求认证服务器...'
 	response=$(wget -q -T 15 -O - "http://192.168.254.226:801/eportal/portal/login?callback=dr1003&login_method=1&user_account=$account_q&user_password=$password_q&wlan_user_ip=$ip&wlan_user_ipv6=&wlan_user_mac=000000000000&wlan_ac_ip=&wlan_ac_name=&jsVersion=4.2.1&terminal_type=$terminal_type&lang=zh-cn&v=4149&lang=zh" 2>/dev/null)
-	[ -n "$response" ] && print_msg "服务器响应: $response"
-	result=$(printf '%s' "$response" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
-	case "$result" in
-		0)
-			log_msg "认证结果: 已经在线 ($ip)"
-			return 0
-			;;
-		1)
+	if [ -z "$response" ]; then
+		log_msg "认证结果: 认证失败 ($ip)"
+		print_msg '服务器没有返回任何响应'
+		print_msg '处理建议：确认路由器已连接校园网，并且“认证网络接口”的 IPv4 地址有效。'
+		return 1
+	fi
+	print_msg "服务器响应: $response"
+
+	result=$(json_number "$response" result)
+	ret_code=$(json_number "$response" ret_code)
+	reply_message=$(json_string "$response" msg)
+	online=0
+
+	# ret_code=1 is the portal's failure flag. It is also set for the
+	# online-device limit case where "result" still reads 0, which the old code
+	# happily reported as a successful authentication.
+	if [ "$ret_code" = '1' ] || is_failure_message "$reply_message" || is_device_limit "$response"; then
+		if is_device_limit "$response"; then
+			fail_reason='已达到运营商允许的同时在线设备数上限'
+		elif [ -n "$reply_message" ]; then
+			fail_reason='认证失败'
+		else
+			fail_reason="认证失败（ret_code=${ret_code:-未知}，result=${result:-未知}）"
+		fi
+	elif [ "$result" = '1' ]; then
+		online=1
+		fail_reason=''
+	elif [ "$result" = '0' ]; then
+		online=1
+		fail_reason=''
+	else
+		fail_reason="认证失败（服务器响应无法解析，result=${result:-未知}）"
+	fi
+
+	if [ "$online" = '1' ]; then
+		if [ "$result" = '1' ]; then
 			log_msg "认证结果: 认证成功 ($ip)"
-			return 0
-			;;
-		*)
-			log_msg '认证结果: 认证失败'
-			if [ -z "$response" ]; then
-				print_msg '服务器没有返回有效响应'
-			else
-				print_msg "服务器响应无法识别: $response"
-			fi
-			return 1
-			;;
-	esac
+			print_msg '认证成功。'
+		else
+			log_msg "认证结果: 已经在线 ($ip)"
+			print_msg '当前 IP 已经在线，无需重复认证。'
+		fi
+		print_reply_message "$reply_message"
+		return 0
+	fi
+
+	log_msg "认证结果: $fail_reason ($ip)"
+	print_reply_message "$reply_message"
+	if is_device_limit "$response"; then
+		print_device_limit_hint
+	else
+		print_failure_hint "$reply_message"
+	fi
+	return 1
 }
 
 case "${1:-login}" in
